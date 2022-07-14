@@ -1,5 +1,6 @@
 dependencies {
     implementation "org.springframework.security:spring-security-oauth2-authorization-server:$oauth2ServerVersion"
+    implementation "org.springframework.boot:spring-boot-starter-oauth2-resource-server:$springBootVersion"
     implementation "org.springframework.boot:spring-boot-starter-web:$springBootVersion"
     implementation "org.springframework.boot:spring-boot-starter-jdbc:$springBootVersion"
     implementation "org.springframework.boot:spring-boot-starter-thymeleaf:$springBootVersion"

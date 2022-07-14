@@ -12,6 +12,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.authorization.OAuth2AuthorizationServerConfigurer;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.OAuth2TokenType;
@@ -26,15 +29,19 @@ import org.springframework.security.oauth2.server.authorization.client.Registere
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.config.ClientSettings;
 import org.springframework.security.oauth2.server.authorization.config.ProviderSettings;
+import org.springframework.security.oauth2.server.authorization.config.TokenSettings;
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Configuration
 public class AuthorizationServerConfig {
@@ -68,7 +75,7 @@ public class AuthorizationServerConfig {
     @Bean
     public RegisteredClientRepository registeredClientRepository(JdbcTemplate jdbcTemplate) {
 
-        RegisteredClient admin = RegisteredClient.withId("ADMIN")
+        RegisteredClient admin = RegisteredClient.withId("admin")
                 .clientId("messaging-admin")
                 .clientSecret("{noop}admin")
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
@@ -83,9 +90,12 @@ public class AuthorizationServerConfig {
                                 "https://example2.com"
                         ))
                         .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofHours(3L))
+                        .build())
                 .build();
 
-        RegisteredClient client = RegisteredClient.withId("CLIENT")
+        RegisteredClient client = RegisteredClient.withId("client")
                 .clientId("messaging-client")
                 .clientSecret("{noop}client")
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
@@ -97,6 +107,9 @@ public class AuthorizationServerConfig {
                 .scope("message.read")
                 .clientSettings(ClientSettings.builder()
                         .requireAuthorizationConsent(true)
+                        .build())
+                .tokenSettings(TokenSettings.builder()
+                        .accessTokenTimeToLive(Duration.ofHours(3L))
                         .build())
                 .build();
 
@@ -127,21 +140,32 @@ public class AuthorizationServerConfig {
 
     @Bean
     @SuppressWarnings("unchecked")
-    public OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer() {
+    public OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer(UserDetailsService userDetailsService) {
         return context -> {
-            if(OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType())){
+            if (OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType())) {
                 RegisteredClient registeredClient = context.getRegisteredClient();
-                List<String> allowedResources = registeredClient.getClientSettings()
-                        .getSetting("settings.client.allowed.resources");
+                Optional.<List<String>>ofNullable(registeredClient.getClientSettings()
+                                .getSetting("settings.client.allowed.resources"))
+                                .ifPresent(settings -> context.getClaims()
+                                .claims(claims -> {
+                                    List<String> aud = (List<String>) claims.get(JwtClaimNames.AUD);
+                                    List<String> updatedAud = new ArrayList<>();
 
+                                    updatedAud.addAll(aud);
+                                    updatedAud.addAll(settings);
+                                    claims.put(JwtClaimNames.AUD, updatedAud);
+                                }));
+            }
+
+            if(context.getAuthorizationGrantType().equals(AuthorizationGrantType.AUTHORIZATION_CODE) ||
+                context.getAuthorizationGrantType().equals(AuthorizationGrantType.PASSWORD)) {
                 context.getClaims()
                         .claims(claims -> {
-                            List<String> aud = (List<String>) claims.get(JwtClaimNames.AUD);
-                            List<String> updatedAud = new ArrayList<>();
-
-                            updatedAud.addAll(aud);
-                            updatedAud.addAll(allowedResources);
-                            claims.put(JwtClaimNames.AUD, updatedAud);
+                            String username = (String) claims.get(JwtClaimNames.SUB);
+                            UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+                            claims.put("roles", userDetails.getAuthorities()
+                                    .stream().map(GrantedAuthority::getAuthority)
+                                    .collect(Collectors.toList()));
                         });
             }
         };

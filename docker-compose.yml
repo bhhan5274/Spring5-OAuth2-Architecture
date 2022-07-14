@@ -1,0 +1,72 @@
+version: "3"
+
+services:
+  mysql:
+    image: mysql
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./mysql/conf.d:/etc/mysql/conf.d
+      - ./mysql/initdb.d:/docker-entrypoint-initdb.d
+    env_file: ./mysql/.env
+    environment:
+      TZ: Asia/Seoul
+    restart: always
+  oauth2:
+    build:
+      context: ./authorization-server
+    image: bhhan/oauth2
+    ports:
+      - "9000:9000"
+    depends_on:
+      - mysql
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql/oauth2?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    restart: always
+  article:
+    build:
+      context: ./article-resource-server
+    image: bhhan/article
+    ports:
+      - "9001:9001"
+    depends_on:
+      - mysql
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql/oauth2?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK-SET-URI: http://oauth2:9000/oauth2/jwks
+    restart: always
+  comment:
+    build:
+      context: ./comment-resource-server
+    image: bhhan/comment
+    ports:
+      - "9002:9002"
+    depends_on:
+      - mysql
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql/oauth2?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK-SET-URI: http://oauth2:9000/oauth2/jwks
+    restart: always
+  gateway:
+    build:
+      context: ./gateway-server
+    image: bhhan/gateway
+    ports:
+      - "9003:9003"
+    environment:
+      ARTICLE_SERVICE: http://article:9001
+      COMMENT_SERVICE: http://comment:9002
+    restart: always
+  federated:
+    build:
+      context: ./federated-identity-authorization-server
+    image: bhhan/federated
+    ports:
+      - "9004:9004"
+    depends_on:
+      - mysql
+    env_file:
+      - .env
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql/oauth2?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    restart: always
